@@ -1,0 +1,856 @@
+---
+title: "Analysis and Modeling"
+author: "Di Zhou"
+date: "06/26/2021"
+output: html_document
+---
+
+# Code for replicating modeling results
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(MASS)
+library(pscl)
+library(stargazer)
+library(table1)
+library(scales)
+
+# display digits instead of scientific notation
+options(scipen = 999)
+```
+
+### Import data
+
+```{r import data}
+
+df_model_rep <- read.csv("data/df_model_rep.csv") # 75079 obs
+
+```
+
+### Correlation table
+
+```{r }
+
+# No continuous emotionality
+M <- df_model_rep %>% 
+  dplyr::select(answer_upvote,
+                nov_std_min0win20,
+                author_followerCount_log,
+                TTR,
+                eng_ratio,
+                answer_nchar_strd) %>%
+  rename(
+    `Answer Upvote` = answer_upvote,
+    `Novelty` = nov_std_min0win20,
+    `Author Follwer (Logged)` = author_followerCount_log, 
+    `Answer Length` = answer_nchar_strd,
+    `Lexicon Diversity` = TTR,
+    `Eng Usage` = eng_ratio
+  )
+
+corr <- round(cor(M), 4)
+as.data.frame(corr)
+
+
+# Including continuous emotionality
+M2 <- df_model_rep %>% 
+  dplyr::select(answer_upvote,
+                nov_std_min0win20,
+                emo,
+                author_followerCount_log,
+                TTR,
+                eng_ratio,
+                answer_nchar_strd) %>%
+  rename(
+    `Answer Upvote` = answer_upvote,
+    `Novelty` = nov_std_min0win20,
+    `Emotionality` = emo,
+    `Author Follwer (Logged)` = author_followerCount_log, 
+    `Answer Length` = answer_nchar_strd,
+    `Lexicon Diversity` = TTR,
+    `Eng Usage` = eng_ratio
+  )
+
+corr2 <- round(cor(M2), 4)
+as.data.frame(corr2)
+
+```
+
+### Descriptive table
+
+```{r descriptive table}
+
+# A Df from group tabulation based whether a post has zero upvote
+tab_chrono <-  df_model_rep
+
+# Tab upvote with top writer: suggest seperate problem, should be removed from hurdle model
+# table(tab_chrono$answer_upvote_ifzero, tab_chrono$author_if_topwriter)
+# table(tab_chrono$q_topic)
+
+# Testing differences between zero & nonzero groups:
+tab_chrono_zero <- tab_chrono %>% filter(answer_upvote_ifzero == 1)
+tab_chrono_nonzero <- tab_chrono %>% filter(answer_upvote_ifzero == 0)
+
+# Descriptive stats table
+# http://thatdatatho.com/2018/08/20/easily-create-descriptive-summary-statistic-tables-r-studio/
+table1::label(tab_chrono$answer_upvote) <- "Answer Upvote"
+table1::label(tab_chrono$nov_std_min0win20) <- "Novelty Score (Standardised)"
+table1::label(tab_chrono$sentiment_cat) <- "Emotionality"
+table1::label(tab_chrono$author_followerCount_log) <- "Author Follower Count (In thousand and logged)"
+table1::label(tab_chrono$author_if_topwriter) <- "If Author is Top Writer"
+table1::label(tab_chrono$answer_nchar_strd) <- "Answer Length (Num of character, standardised)"
+table1::label(tab_chrono$TTR) <- "Lexicon Diversity ( Type Token Ratio)"
+table1::label(tab_chrono$eng_ratio) <- "English Usage (# of Eng Words/Total English Words + Chinese Character)"
+table1::label(tab_chrono$q_answerCount_log) <- "Question Anaswer Count (In hundred and logged)"
+table1::label(tab_chrono$q_viewCount_log) <- "Question View Count (In million and logged)"
+table1::label(tab_chrono$author_gender) <- "Author Gender"
+table1::label(tab_chrono$ele_distance) <- "Time Distance to Election (In day)"
+table1::label(tab_chrono$q_topic) <- "Topic Category of the Question"
+
+table1(~answer_upvote + 
+                 nov_std_min0win20 +
+                 emo +
+                 sentiment_cat +
+                 author_followerCount_log +
+                 author_if_topwriter + 
+                 answer_nchar_strd +
+                 TTR +
+                 eng_ratio +
+                 q_answerCount_log +
+                 q_viewCount_log + 
+                 author_gender +
+                 ele_distance +
+                 q_topic | answer_upvote_ifzero, 
+               data = tab_chrono, round_pad = 3)
+
+```
+
+
+
+### ZINB model
+
+```{r }
+# Since TTR and Eng Ratio are measured at a small scale (from 0 to 1), to show all coefficients clearly
+# rescale TTR and Eng Ratio to a scale from 0 to 10. 
+
+df_model_clean_x10 <- df_model_rep %>% 
+  mutate(TTR = 10*TTR,
+         eng_ratio = 10*eng_ratio,
+         sentiment = 10*sentiment,
+         emo = 10*emo) %>%
+  mutate(TTR_sq = TTR^2,
+         eng_ratio_sq = eng_ratio^2,
+         sentiment_sq = sentiment^2,
+         emo_sq = emo^2)
+
+# Model 1: Novelty linear: novelty(min0win20, standardized), emotion, author follower, author topwriter
+m1 <- hurdle(answer_upvote ~ nov_std_min0win20 + 
+                         sen_pos_ext + sen_pos_mod + sen_pos_sli + sen_neg_sli + sen_neg_mod + sen_neg_ext + 
+                         author_followerCount_log + author_if_topwriter,
+             data = df_model_clean_x10,
+             dist = "negbin", zero.dist = "binomial")
+
+# Model 2: M1 + nov^2 (check if curvilinear hypo of nov applies to data)
+m2 <- hurdle(answer_upvote ~ nov_std_min0win20 + nov_std_sq_min0win20 +
+                         sen_pos_ext + sen_pos_mod + sen_pos_sli + sen_neg_sli + sen_neg_mod + sen_neg_ext + 
+                         author_followerCount_log + author_if_topwriter,
+             data = df_model_clean_x10,
+             dist = "negbin", zero.dist = "binomial")
+
+# Model 3: M2 + TTR + Eng
+m3 <- hurdle(answer_upvote ~ nov_std_min0win20 + nov_std_sq_min0win20 +
+                         sen_pos_ext + sen_pos_mod + sen_pos_sli + sen_neg_sli + sen_neg_mod + sen_neg_ext + 
+                         author_followerCount_log + author_if_topwriter +
+                         TTR + eng_ratio,
+             data = df_model_clean_x10,
+             dist = "negbin", zero.dist = "binomial")
+
+# Model 4: M3 + Length 
+m4 <- hurdle(answer_upvote ~ nov_std_min0win20 + nov_std_sq_min0win20 +
+                         sen_pos_ext + sen_pos_mod + sen_pos_sli + sen_neg_sli + sen_neg_mod + sen_neg_ext + 
+                         author_followerCount_log + author_if_topwriter +
+                         TTR + eng_ratio + answer_nchar_strd,
+             data = df_model_clean_x10,
+             dist = "negbin", zero.dist = "binomial")
+
+# Model 5: M4 + sq terms for TTR & eng ratio & author followers 
+m5 <- hurdle(answer_upvote ~ nov_std_min0win20 + nov_std_sq_min0win20 +
+                         sen_pos_ext + sen_pos_mod + sen_pos_sli + sen_neg_sli + sen_neg_mod + sen_neg_ext + 
+                         author_followerCount_log + author_followerCount_log_sq + author_if_topwriter +
+                         TTR + TTR_sq + eng_ratio + eng_ratio_sq + answer_nchar_strd,
+             data = df_model_clean_x10,
+             dist = "negbin", zero.dist = "binomial")
+
+# Model 6: key IV, all controls
+m6 <- hurdle(answer_upvote ~ nov_std_min0win20 + nov_std_sq_min0win20 +
+                         sen_pos_ext + sen_pos_mod + sen_pos_sli + sen_neg_sli + sen_neg_mod + sen_neg_ext + 
+                         author_followerCount_log + author_followerCount_log_sq + author_if_topwriter +
+                         TTR + TTR_sq +
+                         eng_ratio + eng_ratio_sq +
+                         answer_nchar_strd +
+                         author_female + author_gender_unknown + 
+                         ele_distance +
+                         q_viewCount_log + q_answerCount_log + 
+                         q_topic_election + q_topic_CNcompare + q_topic_USpolitic + q_topic_USsociety,
+             data = df_model_clean_x10,
+             dist = "negbin", zero.dist = "binomial")
+
+# Add BIC
+m1$BIC <- BIC(m1)
+m2$BIC <- BIC(m2)
+m3$BIC <- BIC(m3)
+m4$BIC <- BIC(m4)
+m5$BIC <- BIC(m5)
+m6$BIC <- BIC(m6)
+
+# Display
+stargazer(m1, m2, m3, m4,  m5, m6, 
+          type = "text", 
+          #zero.component = TRUE
+          star.char = c("*", "**", "***"),
+          star.cutoffs = c(0.05, 0.01, 0.001),
+          keep.stat = c("bic", "n"),
+          notes = "To show coefficients, Lexicon Diversity and English Usage have been timed by 10 since their original measuring scale has a small range compared to other variables.")
+
+```
+
+### Coefficient Plot
+
+```{r }
+
+coef_df <- ggstatsplot::ggcoefstats(x = m6, output = "tidy")
+
+# Keep only count component
+## Rename term names for plotting
+new_term <- c("Extremely Positive", "Moderately Positive", "Slightly Positive",
+              "Slightly Negative", "Moderately Negative", "Extremely Negative")
+
+coef_df_plot <- coef_df %>%
+  filter(str_detect(term, "count_sen")) %>%
+  mutate(p.value = round(p.value, 3),
+         term = new_term) %>% 
+  arrange(-row_number()) # Reverse row orders for plotting
+
+ggstatsplot::ggcoefstats(
+  x = coef_df_plot,
+  statistic = "z",
+  only.significant = FALSE,
+  conf.level = 0.99,
+  stats.labels = FALSE,
+  point.args = list(color = "black", size = 1),
+  vline.args = list(size = 0.5, linetype = "dashed")
+) +
+  ggplot2::labs(x = "Coefficients", y = NULL) +
+  theme_classic()
+
+# ggsave("graph/coef_plot_emodum_rr.png", width = 8, height = 5)
+
+
+```
+
+### Novelty: Dummy up to check curvilinearity 
+
+```{r }
+# If novelty is curvilinear, the effect should be highest on middle cut
+df_model_clean_dum <- df_model_clean_x10
+
+# Defind cut breaks
+dum_break <- c(-2, seq( -0.5, 0, 0.1), seq( 1, 5, 1), 7, 9, 13, 18) #use this
+# Create variable
+df_model_clean_dum$novelty_cut <- cut(df_model_clean_dum$nov_std_min0win20, breaks = dum_break)
+# Check distribution
+table(df_model_clean_dum$novelty_cut)
+
+# Model
+m_nov_dum <- hurdle(answer_upvote ~ novelty_cut +
+                         sen_pos_ext + sen_pos_mod + sen_pos_sli + sen_neg_sli + sen_neg_mod + sen_neg_ext + 
+                         author_followerCount_log + author_followerCount_log_sq + author_if_topwriter +
+                         TTR + TTR_sq + 
+                         eng_ratio + eng_ratio_sq +
+                         answer_nchar_strd + 
+                         author_gender + 
+                         ele_distance +
+                         q_viewCount_log + q_answerCount_log + q_topic,
+             data = df_model_clean_dum,
+             dist = "negbin", zero.dist = "binomial")
+
+m_nov_dum$BIC <- BIC(m_nov_dum)
+
+# Display model
+stargazer(m_nov_dum, 
+          type = "text", 
+          keep.stat = c("n", "BIC"), 
+          star.char = c("*", "**", "***"),
+          star.cutoffs = c(0.05, 0.01, 0.001))
+
+# Plot coefficients
+coef_df_dum <- ggstatsplot::ggcoefstats(x = m_nov_dum, output = "tidy")
+coef_dum_plot <- coef_df_dum %>%
+  filter(str_detect(term, "count_novelty_cut")) %>%
+  mutate(p.value = round(p.value, 3), 
+         term = str_remove(term, "^count_novelty_cut"))
+
+ggstatsplot::ggcoefstats(
+  x = coef_dum_plot,
+  statistic = "z",
+  #sort = "ascending",
+  only.significant = FALSE,
+  conf.level = 0.95,
+  stats.labels = FALSE,
+  point.args = list(color = "black", size = 1),
+  vline.args = list(size = 0.5, linetype = "dashed"),
+  title = "Coefficients of Novelty Dummies (Using Model 6, Ref: Novelty ≤ -0.5)",
+  ylab = "Novelty Z-Score"
+)
+# ggsave("graph/coef_novelty_dummies_min0_rr.png", width = 8, height = 4)
+
+
+# Adjust z-score bins level
+levels(coef_dum_plot$term)
+coef_dum_plot$term <- factor(coef_dum_plot$term,
+                             levels = c("(-0.5,-0.4]",
+                                        "(-0.4,-0.3]",
+                                        "(-0.3,-0.2]",
+                                        "(-0.2,-0.1]",
+                                        "(-0.1,0]",
+                                        "(0,1]",
+                                        "(1,2]",
+                                        "(2,3]",
+                                        "(3,4]",
+                                        "(4,5]",
+                                        "(5,7]",
+                                        "(7,9]",
+                                        "(9,13]",
+                                        "(13,18]"))
+
+tt <- coef_dum_plot %>%
+  mutate(range_left = as.numeric(str_extract(term, "(?<=\\()\\S+(?=\\,)")),
+         range_right = as.numeric(str_extract(term, "(?<=\\,)\\S+(?=\\])"))) %>%
+  mutate(range_midpoint = (range_left + range_right)/2)
+
+tt %>% ggplot() +
+  geom_point(data = tt, aes(x = range_midpoint, y = estimate)) +
+  geom_line(data = tt, aes(x = range_midpoint, y = estimate), size = 0.5, color = "grey50") +
+  geom_errorbar(data = tt, aes(x = range_midpoint, y = estimate, ymin = conf.low, ymax = conf.high), width = 0.2) +
+  geom_hline(data = tt, yintercept = 0, linetype = "dashed") + 
+  labs(x = "Novelty z-score", y = "Coefficients of Novelty Dummies") + 
+  scale_x_continuous(breaks = seq(-2, 18, 2)) +
+  geom_rug(data = df_model_rep, aes(nov_std_min0win20), sides = "b", color = "grey50") +
+  theme_linedraw()
+
+# ggsave("graph/coef_novelty_dummies_rotated_rr.png", width = 8, height = 4)
+
+```
+
+### Plot marginal effect: Novelty
+
+```{r }
+# Create dataframe of Yhat for plotting effects
+# Let key X vary, other Xs fixed at mean
+pred_nov <- expand.grid(nov_std_min0win20 = seq(-2, 18, 1)) %>% 
+  mutate(nov_std_sq_min0win20 = nov_std_min0win20^2, 
+         sen_pos_ext = mean(df_model_clean_x10$sen_pos_ext),
+         sen_pos_mod = mean(df_model_clean_x10$sen_pos_mod),
+         sen_pos_sli = mean(df_model_clean_x10$sen_pos_sli),
+         sen_neg_sli = mean(df_model_clean_x10$sen_neg_sli),
+         sen_neg_mod = mean(df_model_clean_x10$sen_neg_mod),  
+         sen_neg_ext = mean(df_model_clean_x10$sen_neg_ext),
+         author_followerCount_log = mean(df_model_clean_x10$author_followerCount_log),
+         author_followerCount_log_sq = author_followerCount_log^2,
+         author_if_topwriter = mean(df_model_clean_x10$author_if_topwriter),
+         answer_nchar_strd = 0,
+         TTR = mean(df_model_clean_x10$TTR),
+         TTR_sq = TTR^2,
+         eng_ratio = mean(df_model_clean_x10$eng_ratio),
+         eng_ratio_sq = eng_ratio^2,
+         author_female = mean(df_model_clean_x10$author_female),
+         author_gender_unknown = mean(df_model_clean_x10$author_gender_unknown),
+         ele_distance = mean(df_model_clean_x10$ele_distance),
+         q_answerCount_hundred = mean(df_model_clean_x10$q_answerCount_hundred),
+         q_answerCount_log = mean(df_model_clean_x10$q_answerCount_log),
+         q_viewCount_million = mean(df_model_clean_x10$q_viewCount_million),
+         q_viewCount_log = mean(df_model_clean_x10$q_viewCount_log),
+         q_topic_election = mean(df_model_clean_x10$q_topic_election),
+         q_topic_CNcompare = mean(df_model_clean_x10$q_topic_CNcompare),
+         q_topic_USpolitic = mean(df_model_clean_x10$q_topic_USpolitic),
+         q_topic_USsociety = mean(df_model_clean_x10$q_topic_USsociety))
+
+# Models: m3, m5, m6
+pred_nov$predicted_upvote_m3 <- predict(m3, pred_nov) # Key IVs
+pred_nov$predicted_upvote_m5<- predict(m5, pred_nov)  # Key IVs + square for TTR, Eng + length
+pred_nov$predicted_upvote_m6 <- predict(m6, pred_nov) # All 
+
+plot_effect_nov <- ggplot() +
+  geom_point(data = pred_nov, aes(x = nov_std_min0win20, y = predicted_upvote_m6), size = 1) + 
+  geom_line(data = pred_nov, aes(x = nov_std_min0win20, y = predicted_upvote_m6), linetype = "solid") +
+  geom_point(data = pred_nov, aes(x = nov_std_min0win20, y = predicted_upvote_m5), size = 1) +
+  geom_line(data = pred_nov, aes(x = nov_std_min0win20, y = predicted_upvote_m5), linetype = "dashed") +
+  geom_point(data = pred_nov, aes(x = nov_std_min0win20, y = predicted_upvote_m3), size = 1) +
+  geom_line(data = pred_nov, aes(x = nov_std_min0win20, y = predicted_upvote_m3), linetype = "dotted") +
+  geom_rug(data = df_model_rep, aes(nov_std_min0win20), sides = "b", color = "grey50") + 
+  scale_y_continuous(limits = c(0, 250), breaks = seq(0, 250, 25)) +
+  scale_x_continuous(limits = c(-2, 18), breaks = seq(-2, 18, 2)) +
+  labs(x = "Novelty", y = "Expected upvotes", color = "Model") +
+  theme_classic()
+  
+plot_effect_nov
+# ggsave("graph/pred_novelty_min0_rr.png", height = 7, width = 10)
+
+
+```
+
+### Plot effect of author followers
+
+```{r }
+
+# Create dataframe of Yhat for plotting effects
+# Let key X vary, other Xs fixed at mean
+pred_author <- expand.grid(author_followerCount_thous = seq(0.001, 500, 25)) %>% 
+  mutate(author_followerCount_log = log(author_followerCount_thous),
+         author_followerCount_log_sq = author_followerCount_log^2,
+         nov_std_min0win20 = 0,
+         nov_std_sq_min0win20 = nov_std_min0win20^2, 
+         sen_pos_ext = mean(df_model_clean_x10$sen_pos_ext),
+         sen_pos_mod = mean(df_model_clean_x10$sen_pos_mod),
+         sen_pos_sli = mean(df_model_clean_x10$sen_pos_sli),
+         sen_neg_sli = mean(df_model_clean_x10$sen_neg_sli),
+         sen_neg_mod = mean(df_model_clean_x10$sen_neg_mod),  
+         sen_neg_ext = mean(df_model_clean_x10$sen_neg_ext),
+         author_if_topwriter = mean(df_model_clean_x10$author_if_topwriter),
+         answer_nchar_strd = 0,
+         TTR = mean(df_model_clean_x10$TTR),
+         TTR_sq = TTR^2,
+         eng_ratio = mean(df_model_clean_x10$eng_ratio),
+         eng_ratio_sq = eng_ratio^2,
+         author_female = mean(df_model_clean_x10$author_female),
+         author_gender_unknown = mean(df_model_clean_x10$author_gender_unknown),
+         ele_distance = mean(df_model_clean_x10$ele_distance),
+         q_answerCount_hundred = mean(df_model_clean_x10$q_answerCount_hundred),
+         q_answerCount_log = mean(df_model_clean_x10$q_answerCount_log),
+         q_viewCount_million = mean(df_model_clean_x10$q_viewCount_million),
+         q_viewCount_log = mean(df_model_clean_x10$q_viewCount_log),
+         q_topic_election = mean(df_model_clean_x10$q_topic_election),
+         q_topic_CNcompare = mean(df_model_clean_x10$q_topic_CNcompare),
+         q_topic_USpolitic = mean(df_model_clean_x10$q_topic_USpolitic),
+         q_topic_USsociety = mean(df_model_clean_x10$q_topic_USsociety))
+
+# Models: 
+pred_author$predicted_upvote_m3 <- predict(m3, pred_author)
+pred_author$predicted_upvote_m5 <- predict(m5, pred_author)
+pred_author$predicted_upvote_m6 <- predict(m6, pred_author)
+
+plot_effect_authorfol <- ggplot() +
+  geom_point(data = pred_author, aes(x = author_followerCount_thous, y = predicted_upvote_m6), size = 1) + 
+  geom_line(data = pred_author, aes(x = author_followerCount_thous, y = predicted_upvote_m6), linetype = "solid") +
+  geom_point(data = pred_author, aes(x = author_followerCount_thous, y = predicted_upvote_m5), size = 1) +
+  geom_line(data = pred_author, aes(x = author_followerCount_thous, y = predicted_upvote_m5), linetype = "dashed") +
+  geom_point(data = pred_author, aes(x = author_followerCount_thous, y = predicted_upvote_m3), size = 1) +
+  geom_line(data = pred_author, aes(x = author_followerCount_thous, y = predicted_upvote_m3), linetype = "dotted") +
+  geom_rug(data = df_model_rep, aes(author_followerCount_thous), sides = "b", color = "grey50") +
+  scale_x_continuous(limits = c(0, 500), breaks = seq(0, 500, 50)) +
+  labs(x = "Author Follower Count (in 1,000)", y = "") +
+  theme_classic() +
+  theme(legend.position = "bottom")
+
+plot_effect_authorfol
+# ggsave("graph/pred_author_rr.png", height = 7, width = 10)
+
+```
+
+### Plot effect of TTR
+
+```{r }
+# Create dataframe of Yhat for plotting effects
+# Let key X vary, other Xs fixed at mean
+pred_ttr <- expand.grid(TTR = seq(0, 10, 0.5)) %>% 
+  mutate(TTR_sq = TTR^2,
+         nov_std_min0win20 = 0,
+         nov_std_sq_min0win20 = nov_std_min0win20^2, 
+         sen_pos_ext = mean(df_model_clean_x10$sen_pos_ext),
+         sen_pos_mod = mean(df_model_clean_x10$sen_pos_mod),
+         sen_pos_sli = mean(df_model_clean_x10$sen_pos_sli),
+         sen_neg_sli = mean(df_model_clean_x10$sen_neg_sli),
+         sen_neg_mod = mean(df_model_clean_x10$sen_neg_mod),  
+         sen_neg_ext = mean(df_model_clean_x10$sen_neg_ext),
+         author_followerCount_log = mean(df_model_clean_x10$author_followerCount_log),
+         author_followerCount_log_sq = author_followerCount_log^2,
+         author_if_topwriter = mean(df_model_clean_x10$author_if_topwriter),
+         answer_nchar_strd = 0,
+         eng_ratio = mean(df_model_clean_x10$eng_ratio),
+         eng_ratio_sq = eng_ratio^2,
+         author_female = mean(df_model_clean_x10$author_female),
+         author_gender_unknown = mean(df_model_clean_x10$author_gender_unknown),
+         ele_distance = mean(df_model_clean_x10$ele_distance),
+         q_answerCount_hundred = mean(df_model_clean_x10$q_answerCount_hundred),
+         q_answerCount_log = mean(df_model_clean_x10$q_answerCount_log),
+         q_viewCount_million = mean(df_model_clean_x10$q_viewCount_million),
+         q_viewCount_log = mean(df_model_clean_x10$q_viewCount_log),
+         q_topic_election = mean(df_model_clean_x10$q_topic_election),
+         q_topic_CNcompare = mean(df_model_clean_x10$q_topic_CNcompare),
+         q_topic_USpolitic = mean(df_model_clean_x10$q_topic_USpolitic),
+         q_topic_USsociety = mean(df_model_clean_x10$q_topic_USsociety))
+
+# Models: 
+pred_ttr$predicted_upvote_m3 <- predict(m3, pred_ttr)
+pred_ttr$predicted_upvote_m5 <- predict(m5, pred_ttr)
+pred_ttr$predicted_upvote_m6 <- predict(m6, pred_ttr)
+
+# Plot
+plot_effect_ttr <- ggplot() +
+  geom_point(data = pred_ttr, aes(x = TTR, y = predicted_upvote_m6), size = 1) + 
+  geom_line(data = pred_ttr, aes(x = TTR, y = predicted_upvote_m6), linetype = "solid") +
+  geom_point(data = pred_ttr, aes(x = TTR, y = predicted_upvote_m5),  size = 1) +
+  geom_line(data = pred_ttr, aes(x = TTR, y = predicted_upvote_m5), linetype = "dashed") +
+  geom_point(data = pred_ttr, aes(x = TTR, y = predicted_upvote_m3),  size = 1) +
+  geom_line(data = pred_ttr, aes(x = TTR, y = predicted_upvote_m3), linetype = "dotted") +
+  geom_rug(data = df_model_clean_x10, aes(TTR), sides = "b", color = "grey50") +
+  scale_y_continuous(limits = c(0, 250), breaks = seq(0, 250, 25)) +
+  scale_x_continuous(limits = c(0, 10), breaks = seq(0, 10, 2)) +
+  labs(x = "Lexical Diversity", y = "Expected Upvotes") +
+  theme_classic() +
+  theme(legend.position = "none")
+
+plot_effect_ttr
+# ggsave("graph/pred_ttr_rr.png", height = 7, width = 10)
+
+```
+
+### Plot effect of Eng Ratio
+
+```{r }
+# Create dataframe of Yhat for plotting effects
+# Let key X vary, other Xs fixed at mean
+pred_eng <- expand.grid(eng_ratio = seq(0, 10, 0.5)) %>% 
+  mutate(eng_ratio_sq = eng_ratio^2,
+         nov_std_min0win20 = 0,
+         nov_std_sq_min0win20 = nov_std_min0win20^2, 
+         sen_pos_ext = mean(df_model_clean_x10$sen_pos_ext),
+         sen_pos_mod = mean(df_model_clean_x10$sen_pos_mod),
+         sen_pos_sli = mean(df_model_clean_x10$sen_pos_sli),
+         sen_neg_sli = mean(df_model_clean_x10$sen_neg_sli),
+         sen_neg_mod = mean(df_model_clean_x10$sen_neg_mod),  
+         sen_neg_ext = mean(df_model_clean_x10$sen_neg_ext),
+         author_followerCount_log = mean(df_model_clean_x10$author_followerCount_log),
+         author_followerCount_log_sq = author_followerCount_log^2,
+         author_if_topwriter = mean(df_model_clean_x10$author_if_topwriter),
+         answer_nchar_strd = 0,
+         TTR = mean(df_model_clean_x10$TTR),
+         TTR_sq = TTR^2,
+         author_female = mean(df_model_clean_x10$author_female),
+         author_gender_unknown = mean(df_model_clean_x10$author_gender_unknown),
+         ele_distance = mean(df_model_clean_x10$ele_distance),
+         q_answerCount_hundred = mean(df_model_clean_x10$q_answerCount_hundred),
+         q_answerCount_log = mean(df_model_clean_x10$q_answerCount_log),
+         q_viewCount_million = mean(df_model_clean_x10$q_viewCount_million),
+         q_viewCount_log = mean(df_model_clean_x10$q_viewCount_log),
+         q_topic_election = mean(df_model_clean_x10$q_topic_election),
+         q_topic_CNcompare = mean(df_model_clean_x10$q_topic_CNcompare),
+         q_topic_USpolitic = mean(df_model_clean_x10$q_topic_USpolitic),
+         q_topic_USsociety = mean(df_model_clean_x10$q_topic_USsociety))
+
+# Models:
+pred_eng$predicted_upvote_m3 <- predict(m3, pred_eng)
+pred_eng$predicted_upvote_m5 <- predict(m5, pred_eng)
+pred_eng$predicted_upvote_m6 <- predict(m6, pred_eng)
+
+plot_effect_eng <- ggplot() +
+  geom_point(data = pred_eng, aes(x = eng_ratio, y = predicted_upvote_m6), size = 1) + 
+  geom_line(data = pred_eng, aes(x = eng_ratio, y = predicted_upvote_m6, linetype = "Model 6 (Final Model)")) +
+  geom_point(data = pred_eng, aes(x = eng_ratio, y = predicted_upvote_m5), size = 1) +
+  geom_line(data = pred_eng, aes(x = eng_ratio, y = predicted_upvote_m5, linetype = "Model 5")) +
+  geom_point(data = pred_eng, aes(x = eng_ratio, y = predicted_upvote_m3), size = 1) +
+  geom_line(data = pred_eng, aes(x = eng_ratio, y = predicted_upvote_m3, linetype = "Model 3")) +
+  geom_rug(data = df_model_clean_x10, aes(eng_ratio), sides = "b", color = "grey50") +
+  scale_y_continuous(limits = c(0, 120), breaks = seq(0, 120, 20)) +
+  scale_x_continuous(limits = c(0, 10), breaks = seq(0, 10, 2)) +
+  labs(x = "English Usage", y = "", linetype = "Model") +
+  scale_linetype_manual(values=c("dotted", "dashed", "solid")) +
+  theme_classic() +
+  theme(legend.position = "none") #+
+   #theme(legend.position = "bottom",
+         #legend.title = element_text(size = 10),
+         #legend.text = element_text(size = 10))
+
+plot_effect_eng
+# ggsave("graph/plot_effect_eng_rr.png", height = 7, width = 10)
+
+```
+
+### Plot effect of emotionality
+
+```{r }
+pred_sen <- tibble(sen_pos_ext = c(1, 0, 0, 0, 0, 0 ,0),
+            sen_pos_mod = c(0, 1, 0, 0, 0, 0, 0),
+            sen_pos_sli = c(0, 0, 1, 0, 0, 0, 0),
+            sen_neg_sli = c(0, 0, 0, 0, 1, 0, 0),
+            sen_neg_mod = c(0, 0, 0, 0, 0, 1, 0),
+            sen_neg_ext = c(0, 0, 0, 0, 0, 0, 1)) %>%
+  mutate(
+         nov_std_min0win20 = 0,
+         nov_std_sq_min0win20 = nov_std_min0win20^2, 
+         author_followerCount_log = mean(df_model_clean_x10$author_followerCount_log),
+         author_followerCount_log_sq = author_followerCount_log^2,
+         author_if_topwriter = mean(df_model_clean_x10$author_if_topwriter),
+         answer_nchar_strd = 0,
+         TTR = mean(df_model_clean_x10$TTR),
+         TTR_sq = TTR^2,
+         eng_ratio = mean(df_model_clean_x10$eng_ratio),
+         eng_ratio_sq = eng_ratio^2,
+         author_female = mean(df_model_clean_x10$author_female),
+         author_gender_unknown = mean(df_model_clean_x10$author_gender_unknown),
+         ele_distance = mean(df_model_clean_x10$ele_distance),
+         q_answerCount_hundred = mean(df_model_clean_x10$q_answerCount_hundred),
+         q_answerCount_log = mean(df_model_clean_x10$q_answerCount_log),
+         q_viewCount_million = mean(df_model_clean_x10$q_viewCount_million),
+         q_viewCount_log = mean(df_model_clean_x10$q_viewCount_log),
+         q_topic_election = mean(df_model_clean_x10$q_topic_election),
+         q_topic_CNcompare = mean(df_model_clean_x10$q_topic_CNcompare),
+         q_topic_USpolitic = mean(df_model_clean_x10$q_topic_USpolitic),
+         q_topic_USsociety = mean(df_model_clean_x10$q_topic_USsociety))
+
+# Models: m3, m5, m6
+pred_sen$predicted_upvote_m3 <- predict(m3, pred_sen)
+pred_sen$predicted_upvote_m5 <- predict(m5, pred_sen)
+pred_sen$predicted_upvote_m6 <- predict(m6, pred_sen)
+
+# Select predicted value columns, Add category name
+pred_sen_pivot <- pred_sen %>%
+  dplyr::select(sen_pos_ext, sen_pos_mod, sen_pos_sli, sen_neg_sli, sen_neg_mod, sen_neg_ext,
+         predicted_upvote_m3, predicted_upvote_m5, predicted_upvote_m6) %>%
+  mutate(sentiment_cat = c("Extremely Positive", "Moderately Positive", "Slightly Positive",
+                           "Neutral",
+                           "Slightly Negative", "Moderately Negative", "Extremely Negative")) %>%
+  pivot_longer(c("predicted_upvote_m3", "predicted_upvote_m5", "predicted_upvote_m6"),
+               names_to = "model",
+               values_to = "predicted_upvote")
+
+# Set sentiment_cat levels
+levels(pred_sen_pivot$sentiment_cat)
+pred_sen_pivot$sentiment_cat <- factor(pred_sen_pivot$sentiment_cat,
+                                       levels = c("Extremely Negative",
+                                                  "Moderately Negative",
+                                                  "Slightly Negative",
+                                                  "Neutral",
+                                                  "Slightly Positive",
+                                                  "Moderately Positive",
+                                                  "Extremely Positive")
+                                       )
+
+levels(pred_sen_pivot$model)
+pred_sen_pivot$model <- factor(pred_sen_pivot$model,
+                               levels = c("predicted_upvote_m6", 
+                                          "predicted_upvote_m3",
+                                          "predicted_upvote_m5")
+                                       )
+
+addline_format <- function(x,...){
+    gsub('\\s','\n',x)
+}
+
+plot_effect_emo <- pred_sen_pivot %>%
+  ggplot(aes(x = sentiment_cat, y = predicted_upvote, group = model)) +
+  geom_point() +
+  geom_line(aes(linetype = model)) +
+  labs(x = "Emotionality", y = "") +
+  scale_x_discrete(
+    labels = addline_format(
+      c("Extremely Negative",
+        "Moderately Negative", 
+        "Slightly Negative",
+        "Neutral",
+        "Slightly Positive", 
+        "Moderately Positive", 
+        "Extremely Positive")
+      )
+    ) +
+  scale_y_continuous(limits = c(12, 35), breaks = seq(10, 35, 5)) +
+  theme_classic() +
+  theme(legend.position = "none")
+
+plot_effect_emo  
+# ggsave("graph/pred_emo_rr.png", height = 4, width = 6)
+
+```
+
+### Sensitivity Test: Min10Win20
+
+```{r }
+
+# Model using min = 10, win = 20
+m6_min10win20 <- hurdle(answer_upvote ~ nov_std_min10win20 + nov_std_sq_min10win20 +
+                         sen_pos_ext + sen_pos_mod + sen_pos_sli + sen_neg_sli + sen_neg_mod + sen_neg_ext + 
+                         author_followerCount_log + author_followerCount_log_sq + author_if_topwriter +
+                         TTR + TTR_sq +
+                         eng_ratio + eng_ratio_sq +
+                         answer_nchar_strd +
+                         author_female + author_gender_unknown + 
+                         ele_distance +
+                         q_viewCount_log + q_answerCount_log + 
+                         q_topic_election + q_topic_CNcompare + q_topic_USpolitic + q_topic_USsociety,
+             data = df_model_clean_x10,
+             dist = "negbin", zero.dist = "binomial")
+
+m6_min10win20$BIC <- BIC(m6_min10win20)
+
+# Display
+stargazer(m6, m6_min10win20, 
+          type = "text", 
+          keep.stat = c("n", "BIC"),
+          star.char = c("*", "**", "***"),
+          star.cutoffs = c(0.05, 0.01, 0.001))
+
+```
+
+### Sensitivity Test: Continuous Emotionality Measures
+
+```{r }
+
+# Model 1: Novelty linear: novelty(min0win20, standardized), emotion, author follower, author topwriter
+m1_emo <- hurdle(answer_upvote ~ nov_std_min0win20 + 
+                   emo + author_followerCount_log + author_if_topwriter,
+             data = df_model_clean_x10,
+             dist = "negbin", zero.dist = "binomial")
+
+# Model 2: M1 + nov^2 (check if curvilinear hypo of nov applies to data)
+m2_emo <- hurdle(answer_upvote ~ nov_std_min0win20 + nov_std_sq_min0win20 +
+                    emo + emo_sq + 
+                    author_followerCount_log + author_if_topwriter,
+             data = df_model_clean_x10,
+             dist = "negbin", zero.dist = "binomial")
+
+# Model 3: M2 + TTR + Eng
+m3_emo <- hurdle(answer_upvote ~ nov_std_min0win20 + nov_std_sq_min0win20 +
+                         emo + emo_sq + 
+                         author_followerCount_log + author_if_topwriter +
+                         TTR + eng_ratio,
+             data = df_model_clean_x10,
+             dist = "negbin", zero.dist = "binomial")
+
+# Model 4: M3 + Length 
+m4_emo <- hurdle(answer_upvote ~ nov_std_min0win20 + nov_std_sq_min0win20 +
+                         emo + emo_sq + 
+                         author_followerCount_log + author_if_topwriter +
+                         TTR + eng_ratio + answer_nchar_strd,
+             data = df_model_clean_x10,
+             dist = "negbin", zero.dist = "binomial")
+
+# Model 5: M4 + sq terms for TTR & eng ratio (other sq terms are not significant)
+m5_emo <- hurdle(answer_upvote ~ nov_std_min0win20 + nov_std_sq_min0win20 +
+                         emo + emo_sq + 
+                         author_followerCount_log + author_followerCount_log_sq + author_if_topwriter +
+                         TTR + TTR_sq + eng_ratio + eng_ratio_sq + answer_nchar_strd,
+             data = df_model_clean_x10,
+             dist = "negbin", zero.dist = "binomial")
+
+# Model 6: key IV, all controls
+m6_emo <- hurdle(answer_upvote ~ nov_std_min0win20 + nov_std_sq_min0win20 +
+                         emo + emo_sq + 
+                         author_followerCount_log + author_followerCount_log_sq + author_if_topwriter +
+                         TTR + TTR_sq +
+                         eng_ratio + eng_ratio_sq +
+                         answer_nchar_strd +
+                         author_female + author_gender_unknown + 
+                         ele_distance +
+                         q_viewCount_log + q_answerCount_log + 
+                         q_topic_election + q_topic_CNcompare + q_topic_USpolitic + q_topic_USsociety,
+             data = df_model_clean_x10,
+             dist = "negbin", zero.dist = "binomial")
+
+
+# Add BIC
+m1_emo$BIC <- BIC(m1_emo)
+m2_emo$BIC <- BIC(m2_emo)
+m3_emo$BIC <- BIC(m3_emo)
+m4_emo$BIC <- BIC(m4_emo)
+m5_emo$BIC <- BIC(m5_emo)
+m6_emo$BIC <- BIC(m6_emo)
+
+# Display
+stargazer(m1_emo, m2_emo, m3_emo, m4_emo,  m5_emo, m6_emo, 
+          type = "text", 
+          star.char = c("*", "**", "***"),
+          star.cutoffs = c(0.05, 0.01, 0.001),
+          keep.stat = c("bic", "n"),
+          notes = "To show coefficients, Emotionality, Lexicon Diversity, and English Usage have been timed by 10 since their original measuring scale has a small range compared to other variables.")
+
+```
+
+### Sensitivity Test: Using only US politics Posts
+
+```{r }
+# Run regression only on US politics posts
+df_model_clean_x10_uspol <- df_model_clean_x10 %>%
+  filter(q_topic == "2016美国大选" | q_topic == "美国政治")
+# 70784 
+
+# Model 1: Novelty linear: novelty(min0win20, standardized), emotion, author follower, author topwriter
+m1_pol <- hurdle(answer_upvote ~ nov_std_min0win20 + 
+               sen_pos_ext + sen_pos_mod + sen_pos_sli + sen_neg_sli + sen_neg_mod + sen_neg_ext + 
+                 author_followerCount_log + author_if_topwriter,
+             data = df_model_clean_x10_uspol,
+             dist = "negbin", zero.dist = "binomial")
+
+# Model 2: M1 + nov^2 (check if curvilinear hypo of nov applies to data)
+m2_pol <- hurdle(answer_upvote ~ nov_std_min0win20 + nov_std_sq_min0win20 +
+               sen_pos_ext + sen_pos_mod + sen_pos_sli + sen_neg_sli + sen_neg_mod + sen_neg_ext + 
+                 author_followerCount_log + author_if_topwriter,
+             data = df_model_clean_x10_uspol,
+             dist = "negbin", zero.dist = "binomial")
+
+# Model 3: M2 + TTR + Eng
+m3_pol <- hurdle(answer_upvote ~ nov_std_min0win20 + nov_std_sq_min0win20 +
+               sen_pos_ext + sen_pos_mod + sen_pos_sli + sen_neg_sli + sen_neg_mod + sen_neg_ext + 
+                 author_followerCount_log + author_if_topwriter +
+               TTR + eng_ratio,
+             data = df_model_clean_x10_uspol,
+             dist = "negbin", zero.dist = "binomial")
+
+# Model 4: M3 + Length 
+m4_pol <- hurdle(answer_upvote ~ nov_std_min0win20 + nov_std_sq_min0win20 +
+               sen_pos_ext + sen_pos_mod + sen_pos_sli + sen_neg_sli + sen_neg_mod + sen_neg_ext + 
+                 author_followerCount_log + author_if_topwriter +
+               TTR + eng_ratio + answer_nchar_strd,
+             data = df_model_clean_x10_uspol,
+             dist = "negbin", zero.dist = "binomial")
+
+# Model 5: M4 + sq terms for TTR & eng ratio (other sq terms are not significant)
+m5_pol <- hurdle(answer_upvote ~ nov_std_min0win20 + nov_std_sq_min0win20 +
+               sen_pos_ext + sen_pos_mod + sen_pos_sli + sen_neg_sli + sen_neg_mod + sen_neg_ext + 
+                 author_followerCount_log + author_followerCount_log_sq + author_if_topwriter +
+               TTR + TTR_sq + eng_ratio + eng_ratio_sq + answer_nchar_strd,
+             data = df_model_clean_x10_uspol,
+             dist = "negbin", zero.dist = "binomial")
+
+# Model 6: key IV, all controls
+m6_pol <- hurdle(answer_upvote ~ nov_std_min0win20 + nov_std_sq_min0win20 +
+               sen_pos_ext + sen_pos_mod + sen_pos_sli + sen_neg_sli + sen_neg_mod + sen_neg_ext + 
+                 author_followerCount_log + author_followerCount_log_sq + author_if_topwriter +
+               TTR + TTR_sq +
+               eng_ratio + eng_ratio_sq +
+               answer_nchar_strd +
+               author_female + author_gender_unknown + 
+               ele_distance +
+               q_viewCount_log + q_answerCount_log + 
+               q_topic_election,
+             data = df_model_clean_x10_uspol,
+             dist = "negbin", zero.dist = "binomial")
+
+# Add BIC
+m1_pol$BIC <- BIC(m1_pol)
+m2_pol$BIC <- BIC(m2_pol)
+m3_pol$BIC <- BIC(m3_pol)
+m4_pol$BIC <- BIC(m4_pol)
+m5_pol$BIC <- BIC(m5_pol)
+m6_pol$BIC <- BIC(m6_pol)
+
+# Display
+stargazer(m1_pol, m2_pol, m3_pol, m4_pol,  m5_pol, m6_pol, 
+          type = "text", 
+          star.char = c("*", "**", "***"),
+          star.cutoffs = c(0.05, 0.01, 0.001),
+          keep.stat = c("bic", "n")
+          )
+
+```
