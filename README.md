@@ -1,5 +1,4 @@
-# resonance_rep
-Replication code and data 
+# Replication code and data 
 
 There are five folders containing code used in different steps of the project. 
 
