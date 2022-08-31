@@ -114,13 +114,13 @@ table1(~answer_upvote +
                  emo +
                  sentiment_cat +
                  author_followerCount_log +
-                 author_if_topwriter + 
-                 answer_nchar_strd +
+                 as.character(author_if_topwriter) + 
                  TTR +
                  eng_ratio +
+                 answer_nchar_strd +
+                 author_gender +
                  #q_answerCount_log +
                  #q_viewCount_log + 
-                 author_gender +
                  ele_distance +
                  q_topic | answer_upvote_ifzero, 
                data = tab_chrono, round_pad = 3)
@@ -281,7 +281,7 @@ ggstatsplot::ggcoefstats(
   ggplot2::labs(x = "Coefficients", y = NULL) +
   theme_classic()
 
-# ggsave("graph/coef_plot_emodum_rr.png", width = 8, height = 5)
+ggsave("graph/coef_plot_emodum.png", width = 8, height = 5)
 
 
 ```
@@ -292,8 +292,8 @@ ggstatsplot::ggcoefstats(
 # If novelty is curvilinear, the effect should be highest on middle cut
 df_model_clean_dum <- df_model_clean_x10
 
-# Defind cut breaks
-dum_break <- c(-2, seq( -0.5, 0, 0.1), seq( 1, 5, 1), 7, 9, 13, 18) #use this
+# Define cut breaks
+dum_break <- c(-2, seq( -0.5, 0, 0.1), seq( 1, 5, 1), 7, 9, 13, 18)
 # Create variable
 df_model_clean_dum$novelty_cut <- cut(df_model_clean_dum$nov_std_min0win20, breaks = dum_break)
 # Check distribution
@@ -328,21 +328,6 @@ coef_dum_plot <- coef_df_dum %>%
   mutate(p.value = round(p.value, 3), 
          term = str_remove(term, "^count_novelty_cut"))
 
-ggstatsplot::ggcoefstats(
-  x = coef_dum_plot,
-  statistic = "z",
-  #sort = "ascending",
-  only.significant = FALSE,
-  conf.level = 0.95,
-  stats.labels = FALSE,
-  point.args = list(color = "black", size = 1),
-  vline.args = list(size = 0.5, linetype = "dashed"),
-  title = "Coefficients of Novelty Dummies (Using Model 6, Ref: Novelty ≤ -0.5)",
-  ylab = "Novelty Z-Score"
-)
-# ggsave("graph/coef_novelty_dummies_min0_rr.png", width = 8, height = 4)
-
-
 # Adjust z-score bins level
 levels(coef_dum_plot$term)
 coef_dum_plot$term <- factor(coef_dum_plot$term,
@@ -376,7 +361,7 @@ tt %>% ggplot() +
   geom_rug(data = df_model_rep, aes(nov_std_min0win20), sides = "b", color = "grey50") +
   theme_linedraw()
 
-# ggsave("graph/coef_novelty_dummies_rotated_rr.png", width = 8, height = 4)
+ggsave("graph/coef_novelty_dummies_rotated.png", width = 8, height = 4)
 
 ```
 
@@ -426,13 +411,13 @@ plot_effect_nov <- ggplot() +
   geom_point(data = pred_nov, aes(x = nov_std_min0win20, y = predicted_upvote_m3), size = 1) +
   geom_line(data = pred_nov, aes(x = nov_std_min0win20, y = predicted_upvote_m3), linetype = "dotted") +
   geom_rug(data = df_model_rep, aes(nov_std_min0win20), sides = "b", color = "grey50") + 
-  scale_y_continuous(limits = c(0, 250), breaks = seq(0, 250, 25)) +
+  scale_y_continuous(limits = c(0, 250), breaks = seq(0, 250, 50)) +
   scale_x_continuous(limits = c(-2, 18), breaks = seq(-2, 18, 2)) +
   labs(x = "Novelty", y = "Expected upvotes", color = "Model") +
   theme_classic()
   
 plot_effect_nov
-# ggsave("graph/pred_novelty_min0_rr.png", height = 7, width = 10)
+ggsave("graph/pred_novelty_min0.png", height = 7, width = 10)
 
 
 ```
@@ -491,7 +476,7 @@ plot_effect_authorfol <- ggplot() +
   theme(legend.position = "bottom")
 
 plot_effect_authorfol
-# ggsave("graph/pred_author_rr.png", height = 7, width = 10)
+ggsave("graph/pred_author.png", height = 7, width = 10)
 
 ```
 
@@ -542,14 +527,14 @@ plot_effect_ttr <- ggplot() +
   geom_point(data = pred_ttr, aes(x = TTR, y = predicted_upvote_m3),  size = 1) +
   geom_line(data = pred_ttr, aes(x = TTR, y = predicted_upvote_m3), linetype = "dotted") +
   geom_rug(data = df_model_clean_x10, aes(TTR), sides = "b", color = "grey50") +
-  scale_y_continuous(limits = c(0, 250), breaks = seq(0, 250, 25)) +
+  scale_y_continuous(limits = c(0, 250), breaks = seq(0, 250, 50)) +
   scale_x_continuous(limits = c(0, 10), breaks = seq(0, 10, 2)) +
   labs(x = "Lexical Diversity", y = "Expected Upvotes") +
   theme_classic() +
   theme(legend.position = "none")
 
 plot_effect_ttr
-# ggsave("graph/pred_ttr_rr.png", height = 7, width = 10)
+ggsave("graph/pred_ttr.png", height = 7, width = 10)
 
 ```
 
@@ -610,7 +595,7 @@ plot_effect_eng <- ggplot() +
          #legend.text = element_text(size = 10))
 
 plot_effect_eng
-# ggsave("graph/plot_effect_eng_rr.png", height = 7, width = 10)
+ggsave("graph/pred_eng.png", height = 7, width = 10)
 
 ```
 
@@ -706,7 +691,7 @@ plot_effect_emo <- pred_sen_pivot %>%
   theme(legend.position = "none")
 
 plot_effect_emo  
-# ggsave("graph/pred_emo_rr.png", height = 4, width = 6)
+ggsave("graph/pred_emodum.png", height = 4, width = 6)
 
 ```
 
