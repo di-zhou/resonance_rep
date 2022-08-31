@@ -118,12 +118,48 @@ table1(~answer_upvote +
                  answer_nchar_strd +
                  TTR +
                  eng_ratio +
-                 q_answerCount_log +
-                 q_viewCount_log + 
+                 #q_answerCount_log +
+                 #q_viewCount_log + 
                  author_gender +
                  ele_distance +
                  q_topic | answer_upvote_ifzero, 
                data = tab_chrono, round_pad = 3)
+
+
+# The statistics for q_answerCount_log and q_viewCount_log need to replaced 
+# by the following result b/c duplicate question IDs need to be removed
+
+# Question's Answer Count and Question's View Count Stats: By group
+q_stats_group <- df_model_rep %>%
+  group_by(answer_upvote_ifzero) %>%
+  distinct(q_id, .keep_all = TRUE) %>%
+  summarise(answer_count_mean = mean(q_answerCount_log),
+            answer_count_sd = sd(q_answerCount_log),
+            answer_count_median = median(q_answerCount_log),
+            answer_count_max = max(q_answerCount_log),
+            answer_count_min = min(q_answerCount_log),
+            view_count_mean = mean(q_viewCount_log),
+            view_count_sd = sd(q_viewCount_log),
+            view_count_median = median(q_viewCount_log),
+            view_count_max = max(q_viewCount_log),
+            view_count_min = min(q_viewCount_log)) %>%
+  t()
+
+# Question's Answer Count and Question's View Count Stats: Overall
+q_stats_ttl <- df_model_rep %>%
+  distinct(q_id, .keep_all = TRUE) %>%
+  summarise(answer_count_mean = mean(q_answerCount_log),
+            answer_count_sd = sd(q_answerCount_log),
+            answer_count_median = median(q_answerCount_log),
+            answer_count_max = max(q_answerCount_log),
+            answer_count_min = min(q_answerCount_log),
+            view_count_mean = mean(q_viewCount_log),
+            view_count_sd = sd(q_viewCount_log),
+            view_count_median = median(q_viewCount_log),
+            view_count_max = max(q_viewCount_log),
+            view_count_min = min(q_viewCount_log)) %>%
+  t()
+
 
 ```
 
